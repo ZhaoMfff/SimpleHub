@@ -59,6 +59,7 @@ jobs:
           files: |
             dist/release/simplehub-linux-x64.tar.gz
             dist/release/simplehub-linux-arm64.tar.gz
+            dist/release/simplehub-alwaysdata.tar.gz
             dist/release/SHA256SUMS
             scripts/install.sh
             scripts/install-alwaysdata.sh

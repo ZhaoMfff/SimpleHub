@@ -117,6 +117,7 @@ write_env_if_missing() {
   local jwt_secret="$(random_hex)"
   local encryption_key="$(random_hex)"
 
+  local tmp_env="$TMP_DIR/simplehub.env"
   {
     printf 'NODE_ENV=production\n'
     printf 'PORT=%s\n' "$PORT"
@@ -125,8 +126,9 @@ write_env_if_missing() {
     printf 'ENCRYPTION_KEY=%s\n' "$encryption_key"
     printf 'ADMIN_EMAIL=%s\n' "$admin_email"
     printf 'ADMIN_PASSWORD=%s\n' "$admin_password"
-  } > "$env_file"
-  chmod 600 "$env_file"
+  } > "$tmp_env"
+  run_as_installer cp "$tmp_env" "$env_file"
+  run_as_installer chmod 600 "$env_file"
   log "已生成初始配置: $env_file"
   log "默认管理员账号: $admin_email"
   log "默认管理员密码: $admin_password"
@@ -161,7 +163,7 @@ ensure_user() {
 }
 
 install_systemd_service() {
-  command -v systemctl >/dev/null 2>&1 || {
+  if ! command -v systemctl >/dev/null 2>&1; then
     warn "未检测到 systemd，可手动运行: $INSTALL_DIR/current/bin/simplehub"
     return
   fi
@@ -249,15 +251,15 @@ main() {
   tar -xzf "$TMP_DIR/$asset" -C "$TMP_DIR"
 
   run_as_installer rm -rf "$release_dir"
-  mkdir -p "$release_dir"
-  cp -a "$TMP_DIR/simplehub/." "$release_dir/"
-  chmod +x "$release_dir/bin/simplehub"
+  run_as_installer mkdir -p "$release_dir"
+  run_as_installer cp -a "$TMP_DIR/simplehub/." "$release_dir/"
+  run_as_installer chmod +x "$release_dir/bin/simplehub"
 
   ensure_user
   write_env_if_missing
 
-  ln -sfn "$release_dir" "$INSTALL_DIR/current"
-  ln -sfn "$INSTALL_DIR/.env" "$release_dir/.env"
+  run_as_installer ln -sfn "$release_dir" "$INSTALL_DIR/current"
+  run_as_installer ln -sfn "$INSTALL_DIR/.env" "$release_dir/.env"
   if [ -n "$HAS_ROOT" ]; then
     as_root chown -R "$RUN_USER:$RUN_GROUP" "$INSTALL_DIR/data" "$INSTALL_DIR/.env" "$INSTALL_DIR/releases" || true
   fi
@@ -288,5 +290,6 @@ main() {
     log "或直接前台运行:"
     log "  $INSTALL_DIR/current/bin/simplehub"
   fi
+}
 
 main "$@"

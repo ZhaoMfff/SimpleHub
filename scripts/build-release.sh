@@ -14,7 +14,7 @@ VERSION="${VERSION#v}"
 
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR" "$OUT_DIR"
-rm -f "$OUT_DIR"/simplehub-linux-*.tar.gz "$OUT_DIR"/SHA256SUMS
+rm -f "$OUT_DIR"/simplehub-linux-*.tar.gz "$OUT_DIR"/simplehub-alwaysdata.tar.gz "$OUT_DIR"/SHA256SUMS
 
 (
   cd "$ROOT_DIR/web"
@@ -26,8 +26,26 @@ rm -f "$OUT_DIR"/simplehub-linux-*.tar.gz "$OUT_DIR"/SHA256SUMS
   cd "$ROOT_DIR/server"
   npm ci --no-audit --no-fund
   npx prisma generate
-  npm prune --production
+  npm prune --omit=dev
 )
+
+make_alwaysdata_package() {
+  local package_dir="$WORK_DIR/simplehub"
+
+  rm -rf "$package_dir"
+  mkdir -p "$package_dir/server" "$package_dir/web"
+
+  cp -a "$ROOT_DIR/server/package.json" "$package_dir/server/package.json"
+  cp -a "$ROOT_DIR/server/package-lock.json" "$package_dir/server/package-lock.json"
+  cp -a "$ROOT_DIR/server/prisma" "$package_dir/server/prisma"
+  cp -a "$ROOT_DIR/server/scripts" "$package_dir/server/scripts"
+  cp -a "$ROOT_DIR/server/src" "$package_dir/server/src"
+  cp -a "$ROOT_DIR/web/dist" "$package_dir/web/dist"
+  cp -a "$ROOT_DIR/LICENSE" "$package_dir/LICENSE"
+  printf '%s\n' "$VERSION" > "$package_dir/VERSION"
+
+  tar -C "$WORK_DIR" -czf "$OUT_DIR/simplehub-alwaysdata.tar.gz" simplehub
+}
 
 make_package() {
   local arch="$1"
@@ -72,8 +90,9 @@ SH
 
 make_package x64 x64
 make_package arm64 arm64
+make_alwaysdata_package
 
 (
   cd "$OUT_DIR"
-  sha256sum simplehub-linux-*.tar.gz > SHA256SUMS
+  sha256sum simplehub-linux-*.tar.gz simplehub-alwaysdata.tar.gz > SHA256SUMS
 )
