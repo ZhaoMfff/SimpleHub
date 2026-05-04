@@ -3,12 +3,42 @@ set -Eeuo pipefail
 
 REPO="${SIMPLEHUB_REPO:-jwy87/SimpleHub}"
 VERSION="${SIMPLEHUB_VERSION:-latest}"
-INSTALL_DIR="${SIMPLEHUB_INSTALL_DIR:-/opt/simplehub}"
+INSTALL_DIR="${SIMPLEHUB_INSTALL_DIR:-}"
 SERVICE_NAME="${SIMPLEHUB_SERVICE_NAME:-simplehub}"
 PORT="${SIMPLEHUB_PORT:-3000}"
-RUN_USER="${SIMPLEHUB_USER:-simplehub}"
-RUN_GROUP="${SIMPLEHUB_GROUP:-simplehub}"
+RUN_USER="${SIMPLEHUB_USER:-}"
+RUN_GROUP="${SIMPLEHUB_GROUP:-}"
 TMP_DIR="$(mktemp -d)"
+
+HAS_ROOT=""
+if [ "$(id -u)" -eq 0 ]; then
+  HAS_ROOT="1"
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  HAS_ROOT="1"
+fi
+
+if [ -z "$INSTALL_DIR" ]; then
+  if [ -n "$HAS_ROOT" ]; then
+    INSTALL_DIR="/opt/simplehub"
+  else
+    INSTALL_DIR="${HOME}/simplehub"
+  fi
+fi
+
+if [ -z "$RUN_USER" ]; then
+  RUN_USER="$(id -un)"
+fi
+if [ -z "$RUN_GROUP" ]; then
+  RUN_GROUP="$(id -gn)"
+fi
+
+run_as_installer() {
+  if [ -n "$HAS_ROOT" ]; then
+    as_root "$@"
+  else
+    "$@"
+  fi
+}
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -38,7 +68,7 @@ as_root() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
   else
-    fail "请使用 root 运行，或安装 sudo"
+    fail "需要 root 权限执行此操作，但当前没有 sudo"
   fi
 }
 
@@ -87,22 +117,27 @@ write_env_if_missing() {
   local jwt_secret="$(random_hex)"
   local encryption_key="$(random_hex)"
 
-  as_root tee "$env_file" >/dev/null <<EOF
-NODE_ENV=production
-PORT=$PORT
-DATABASE_URL=file:$INSTALL_DIR/data/db.sqlite
-JWT_SECRET=$jwt_secret
-ENCRYPTION_KEY=$encryption_key
-ADMIN_EMAIL=$admin_email
-ADMIN_PASSWORD=$admin_password
-EOF
-  as_root chmod 600 "$env_file"
+  {
+    printf 'NODE_ENV=production\n'
+    printf 'PORT=%s\n' "$PORT"
+    printf 'DATABASE_URL=file:%s/data/db.sqlite\n' "$INSTALL_DIR"
+    printf 'JWT_SECRET=%s\n' "$jwt_secret"
+    printf 'ENCRYPTION_KEY=%s\n' "$encryption_key"
+    printf 'ADMIN_EMAIL=%s\n' "$admin_email"
+    printf 'ADMIN_PASSWORD=%s\n' "$admin_password"
+  } > "$env_file"
+  chmod 600 "$env_file"
   log "已生成初始配置: $env_file"
   log "默认管理员账号: $admin_email"
   log "默认管理员密码: $admin_password"
 }
 
 ensure_user() {
+  if [ -z "$HAS_ROOT" ]; then
+    log "无 root 权限，跳过创建系统用户"
+    return
+  fi
+
   if id "$RUN_USER" >/dev/null 2>&1; then
     if ! getent group "$RUN_GROUP" >/dev/null 2>&1; then
       RUN_GROUP="$(id -gn "$RUN_USER")"
@@ -127,11 +162,12 @@ ensure_user() {
 
 install_systemd_service() {
   command -v systemctl >/dev/null 2>&1 || {
-    warn "未检测到 systemd，已安装文件但未创建服务。可手动运行: $INSTALL_DIR/current/bin/simplehub"
+    warn "未检测到 systemd，可手动运行: $INSTALL_DIR/current/bin/simplehub"
     return
-  }
+  fi
 
-  as_root tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null <<EOF
+  if [ -n "$HAS_ROOT" ]; then
+    as_root tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null <<EOF
 [Unit]
 Description=SimpleHub
 After=network-online.target
@@ -150,9 +186,31 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+    as_root systemctl daemon-reload
+    as_root systemctl enable "$SERVICE_NAME" >/dev/null
+  else
+    mkdir -p "${HOME}/.config/systemd/user"
+    cat > "${HOME}/.config/systemd/user/${SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=SimpleHub
+After=network-online.target
+Wants=network-online.target
 
-  as_root systemctl daemon-reload
-  as_root systemctl enable "$SERVICE_NAME" >/dev/null
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR/current
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=$INSTALL_DIR/current/bin/simplehub
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable "$SERVICE_NAME" >/dev/null
+    log "已创建用户级 systemd 服务: systemctl --user start $SERVICE_NAME"
+  fi
 }
 
 main() {
@@ -180,7 +238,7 @@ main() {
   log "架构: $arch"
   log "下载: $url"
 
-  as_root mkdir -p "$INSTALL_DIR/releases" "$INSTALL_DIR/data"
+  run_as_installer mkdir -p "$INSTALL_DIR/releases" "$INSTALL_DIR/data"
   curl -fL "$url" -o "$TMP_DIR/$asset"
   if command -v sha256sum >/dev/null 2>&1; then
     curl -fL "$sums_url" -o "$TMP_DIR/SHA256SUMS"
@@ -190,28 +248,45 @@ main() {
   fi
   tar -xzf "$TMP_DIR/$asset" -C "$TMP_DIR"
 
-  as_root rm -rf "$release_dir"
-  as_root mkdir -p "$release_dir"
-  as_root cp -a "$TMP_DIR/simplehub/." "$release_dir/"
-  as_root chmod +x "$release_dir/bin/simplehub"
+  run_as_installer rm -rf "$release_dir"
+  mkdir -p "$release_dir"
+  cp -a "$TMP_DIR/simplehub/." "$release_dir/"
+  chmod +x "$release_dir/bin/simplehub"
 
   ensure_user
   write_env_if_missing
 
-  as_root ln -sfn "$release_dir" "$INSTALL_DIR/current"
-  as_root ln -sfn "$INSTALL_DIR/.env" "$release_dir/.env"
-  as_root chown -R "$RUN_USER:$RUN_GROUP" "$INSTALL_DIR/data" "$INSTALL_DIR/.env" "$INSTALL_DIR/releases" || true
+  ln -sfn "$release_dir" "$INSTALL_DIR/current"
+  ln -sfn "$INSTALL_DIR/.env" "$release_dir/.env"
+  if [ -n "$HAS_ROOT" ]; then
+    as_root chown -R "$RUN_USER:$RUN_GROUP" "$INSTALL_DIR/data" "$INSTALL_DIR/.env" "$INSTALL_DIR/releases" || true
+  fi
 
   install_systemd_service
 
   if command -v systemctl >/dev/null 2>&1; then
-    as_root systemctl restart "$SERVICE_NAME"
-    log "服务已启动: systemctl status $SERVICE_NAME"
+    if [ -n "$HAS_ROOT" ]; then
+      as_root systemctl restart "$SERVICE_NAME"
+      log "服务已启动: systemctl status $SERVICE_NAME"
+    else
+      systemctl --user restart "$SERVICE_NAME" 2>/dev/null || true
+      log "用户级服务已启动: systemctl --user start $SERVICE_NAME"
+    fi
   fi
 
   log "安装/更新完成。数据目录: $INSTALL_DIR/data"
   log "配置文件: $INSTALL_DIR/.env"
   log "访问地址: http://服务器IP:$PORT"
-}
+  if [ -z "$HAS_ROOT" ]; then
+    log ""
+    log "无 root 权限，systemd 用户服务已创建，可使用以下命令管理："
+    log "  启动: systemctl --user start $SERVICE_NAME"
+    log "  停止: systemctl --user stop $SERVICE_NAME"
+    log "  状态: systemctl --user status $SERVICE_NAME"
+    log "  日志: journalctl --user -u $SERVICE_NAME -f"
+    log ""
+    log "或直接前台运行:"
+    log "  $INSTALL_DIR/current/bin/simplehub"
+  fi
 
 main "$@"
