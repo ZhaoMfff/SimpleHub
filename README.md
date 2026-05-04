@@ -240,13 +240,6 @@ npm start
 - 支持 `http://127.0.0.1:7890`、`http://user:pass@host:port`、`socks5://user:pass@host:port`
 - 代理会统一作用于该站点的模型检测、余额查询、签到、令牌管理、分组读取、兑换码等所有后端请求
 
-### GitHub Actions 发布说明
-
-- 当前 `.github/workflows/docker-publish.yml` 使用 GitHub 自动提供的 `GITHUB_TOKEN` 推送 GHCR，一般不需要额外自定义 Secrets
-- 在你的 fork 仓库中，需要确认 `Settings -> Actions -> General -> Workflow permissions` 设为 **Read and write permissions**
-- 如果要让镜像推送到 `ghcr.io/<你的用户名>/SimpleHub`，还需要确认该仓库允许 GitHub Actions 写入 GitHub Packages
-- 应用运行本身需要关注的环境变量仍然是：`DATABASE_URL`、`ADMIN_EMAIL`、`ADMIN_PASSWORD`、`PORT`、`NODE_ENV`、`JWT_SECRET`、`ENCRYPTION_KEY`
-
 ### 签到功能
 
 1. 编辑 NewAPI、Veloera、VOAPI 类型的站点
