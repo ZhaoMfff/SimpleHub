@@ -60,6 +60,11 @@ function createUpstreamServer() {
         method: req.method,
         viaProxy: req.headers['x-through-proxy'] === 'yes',
         authorization: req.headers.authorization || '',
+        newApiUser: req.headers['new-api-user'] || '',
+        accept: req.headers.accept || '',
+        origin: req.headers.origin || '',
+        referer: req.headers.referer || '',
+        contentLength: req.headers['content-length'] || '',
         body: rawBody ? JSON.parse(rawBody) : null
       });
 
@@ -91,6 +96,16 @@ function createUpstreamServer() {
           return;
         }
 
+        return;
+      }
+
+      if (url.pathname === '/api/token/1/key' && req.method === 'POST') {
+        res.end(JSON.stringify({
+          success: true,
+          data: {
+            key: 'full-token-key'
+          }
+        }));
         return;
       }
 
@@ -716,6 +731,40 @@ test('generic token routes normalize sk prefix for display and strip it on updat
     const updateRequest = upstream.requests.find((request) => request.path === '/api/token/' && request.method === 'PUT');
     assert.equal(updateRequest.authorization, 'Bearer sk-generic-admin');
     assert.equal(updateRequest.body.key, 'tok-1');
+  } finally {
+    await new Promise((resolve) => upstream.server.close(resolve));
+  }
+});
+
+test('newapi token key route fetches full key and keeps user header', async () => {
+  const upstream = createUpstreamServer();
+  const upstreamPort = await listen(upstream.server);
+
+  try {
+    const site = await createSite({
+      name: 'newapi-token-site',
+      baseUrl: `http://127.0.0.1:${upstreamPort}`,
+      apiKey: 'sk-newapi-admin',
+      apiType: 'newapi',
+      userId: '226'
+    });
+
+    const keyResponse = await app.inject({
+      method: 'POST',
+      url: `/api/sites/${site.id}/tokens/1/key`
+    });
+
+    assert.equal(keyResponse.statusCode, 200, keyResponse.body);
+    assert.equal(keyResponse.json().success, true);
+    assert.equal(keyResponse.json().data.key, 'sk-full-token-key');
+
+    const keyRequest = upstream.requests.find((request) => request.path === '/api/token/1/key' && request.method === 'POST');
+    assert.equal(keyRequest.authorization, 'Bearer sk-newapi-admin');
+    assert.equal(keyRequest.newApiUser, '226');
+    assert.equal(keyRequest.accept, 'application/json, text/plain, */*');
+    assert.equal(keyRequest.origin, `http://127.0.0.1:${upstreamPort}`);
+    assert.equal(keyRequest.referer, `http://127.0.0.1:${upstreamPort}/console/token`);
+    assert.equal(keyRequest.contentLength, '0');
   } finally {
     await new Promise((resolve) => upstream.server.close(resolve));
   }

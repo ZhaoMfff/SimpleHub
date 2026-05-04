@@ -946,6 +946,85 @@ async function routes(fastify) {
       return { error: e.message || '获取令牌列表失败' };
     }
   });
+
+  fastify.post('/api/sites/:id/tokens/:tokenId/key', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          tokenId: { type: 'string' }
+        },
+        required: ['id', 'tokenId']
+      }
+    }
+  }, async (request, reply) => {
+    const { id, tokenId } = request.params;
+
+    try {
+      const site = await prisma.site.findUnique({ where: { id } });
+      if (!site) {
+        reply.code(404);
+        return { error: '站点不存在' };
+      }
+
+      if (site.apiType === 'voapi') {
+        reply.code(400);
+        return { error: '当前站点类型不需要单独获取完整令牌' };
+      }
+
+      const token = site.apiKeyEnc ? decrypt(site.apiKeyEnc) : null;
+      if (!token) {
+        reply.code(400);
+        return { error: '站点未配置API令牌' };
+      }
+
+      const baseUrl = site.baseUrl.replace(/\/$/, '');
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'Cache-Control': 'no-store',
+        'Origin': baseUrl,
+        'Referer': `${baseUrl}/console/token`
+      };
+
+      if (site.userId) {
+        if (site.apiType === 'newapi') {
+          headers['New-Api-User'] = site.userId;
+        } else if (site.apiType === 'veloera') {
+          headers['Veloera-User'] = site.userId;
+        }
+      }
+
+      const res = await siteFetch(site, `${baseUrl}/api/token/${tokenId}/key`, {
+        method: 'POST',
+        headers,
+        body: ''
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.success === false) {
+        throw new Error(`获取完整令牌失败: ${data.error || data.message || `HTTP ${res.status}`}`);
+      }
+
+      const fullKey = data?.data?.key || data?.key;
+      if (!fullKey) {
+        throw new Error('获取完整令牌失败');
+      }
+
+      return {
+        success: true,
+        data: {
+          key: normalizeManagedTokenKey(fullKey)
+        }
+      };
+    } catch (e) {
+      fastify.log.error({ error: e.message, siteId: id, tokenId }, 'Error fetching token key');
+      reply.code(500);
+      return { error: e.message || '获取完整令牌失败' };
+    }
+  });
   
   // 代理获取站点分组列表
   fastify.get('/api/sites/:id/groups', {

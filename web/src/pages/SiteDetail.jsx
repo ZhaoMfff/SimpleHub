@@ -49,6 +49,7 @@ export default function SiteDetail() {
   const [tokenModalVisible, setTokenModalVisible] = useState(false)
   const [tokens, setTokens] = useState([])
   const [tokenLoading, setTokenLoading] = useState(false)
+  const [copyingTokenIds, setCopyingTokenIds] = useState(new Set())
   const [editModalVisible, setEditModalVisible] = useState(false)
   const [createModalVisible, setCreateModalVisible] = useState(false)
   const [editingToken, setEditingToken] = useState(null)
@@ -68,11 +69,28 @@ export default function SiteDetail() {
   const [initialLoading, setInitialLoading] = useState(true)
 
   const copyToClipboard = useCallback((text, successMsg = '复制成功') => {
-    navigator.clipboard.writeText(text).then(() => {
-      message.success(successMsg)
-    }).catch(() => {
-      message.error('复制失败，请手动复制')
-    })
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        message.success(successMsg)
+      }).catch(() => {
+        message.error('复制失败，请手动复制')
+      })
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try {
+        document.execCommand('copy')
+        message.success(successMsg)
+      } catch (e) {
+        message.error('复制失败，请手动复制')
+      } finally {
+        document.body.removeChild(textarea)
+      }
+    }
   }, [])
 
   const copyAllModels = useCallback((models) => {
@@ -83,6 +101,52 @@ export default function SiteDetail() {
     const names = models.map(m => m.id).join(',')
     copyToClipboard(names, `已复制 ${models.length} 个模型名称`)
   }, [copyToClipboard])
+
+  const copyTokenKey = useCallback(async (token) => {
+    const currentKey = token?.key || ''
+    if (!currentKey) {
+      message.warning('没有可复制的令牌')
+      return
+    }
+
+    if (!String(currentKey).includes('*')) {
+      copyToClipboard(currentKey, '令牌已复制')
+      return
+    }
+
+    if (!token?.id) {
+      message.error('缺少令牌ID，无法获取完整令牌')
+      return
+    }
+
+    setCopyingTokenIds(prev => new Set(prev).add(token.id))
+    try {
+      const res = await fetch(`/api/sites/${id}/tokens/${token.id}/key`, {
+        method: 'POST',
+        headers: authHeaders()
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || data.message || '获取完整令牌失败，请确认当前站点支持通过令牌ID获取完整key')
+      }
+
+      const fullKey = data?.data?.key || data?.key
+      if (!fullKey) {
+        throw new Error('获取完整令牌失败')
+      }
+
+      copyToClipboard(fullKey, '完整令牌已复制')
+      setTokens(prev => prev.map(item => item.id === token.id ? { ...item, key: fullKey } : item))
+    } catch (e) {
+      message.error(e.message || '获取完整令牌失败')
+    } finally {
+      setCopyingTokenIds(prev => {
+        const next = new Set(prev)
+        next.delete(token.id)
+        return next
+      })
+    }
+  }, [copyToClipboard, id])
 
   const getModelPricing = useCallback((modelId) => {
     if (!pricingData) return null
@@ -1138,14 +1202,15 @@ export default function SiteDetail() {
               dataIndex: 'key',
               width: 200,
               ellipsis: true,
-              render: (key) => (
+              render: (key, record) => (
                 <Space>
                   <Typography.Text ellipsis style={{ maxWidth: 150 }}>{key}</Typography.Text>
                   <Button
                     type="text"
                     size="small"
                     icon={<CopyOutlined />}
-                    onClick={() => copyToClipboard(key, '令牌已复制')}
+                    loading={copyingTokenIds.has(record.id)}
+                    onClick={() => copyTokenKey(record)}
                   />
                 </Space>
               )
@@ -1720,11 +1785,28 @@ const Section = memo(({ title, items, type, icon }) => {
   }
 
   const copyToClipboard = useCallback((text, successMsg = '复制成功') => {
-    navigator.clipboard.writeText(text).then(() => {
-      message.success(successMsg)
-    }).catch(() => {
-      message.error('复制失败，请手动复制')
-    })
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        message.success(successMsg)
+      }).catch(() => {
+        message.error('复制失败，请手动复制')
+      })
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try {
+        document.execCommand('copy')
+        message.success(successMsg)
+      } catch (e) {
+        message.error('复制失败，请手动复制')
+      } finally {
+        document.body.removeChild(textarea)
+      }
+    }
   }, [])
 
   const copyAllModels = useCallback(() => {

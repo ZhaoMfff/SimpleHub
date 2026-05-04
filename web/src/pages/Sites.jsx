@@ -105,6 +105,31 @@ function validateProxyUrl(_, value) {
   }
 }
 
+function copyText(text, successMsg = '复制成功') {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      message.success(successMsg)
+    }).catch(() => {
+      message.error('复制失败，请手动复制')
+    })
+  } else {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      message.success(successMsg)
+    } catch (e) {
+      message.error('复制失败，请手动复制')
+    } finally {
+      document.body.removeChild(textarea)
+    }
+  }
+}
+
 export default function Sites() {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(false)
@@ -2814,8 +2839,7 @@ export default function Sites() {
                     size="small"
                     style={{ marginTop: 8 }}
                     onClick={() => {
-                      navigator.clipboard.writeText(debugData.rawResponse)
-                      message.success('已复制到剪贴板')
+                      copyText(debugData.rawResponse, '已复制到剪贴板')
                     }}
                   >
                     复制原始响应
@@ -3212,8 +3236,7 @@ export default function Sites() {
                               style={{ fontSize: 12, color: '#52c41a', padding: '4px 8px' }}
                               onClick={() => {
                                 const names = diff.added.map(m => m.id).join(',')
-                                navigator.clipboard.writeText(names)
-                                message.success(`已复制 ${diff.added.length} 个模型ID`)
+                                copyText(names, `已复制 ${diff.added.length} 个模型ID`)
                               }}
                             >
                               复制全部
@@ -3232,8 +3255,7 @@ export default function Sites() {
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  navigator.clipboard.writeText(model.id)
-                                  message.success(`已复制: ${model.id}`)
+                                  copyText(model.id, `已复制: ${model.id}`)
                                 }}
                               >
                                 {model.id}
@@ -3280,8 +3302,7 @@ export default function Sites() {
                               style={{ fontSize: 12, color: '#ff4d4f', padding: '4px 8px' }}
                               onClick={() => {
                                 const names = diff.removed.map(m => m.id).join(',')
-                                navigator.clipboard.writeText(names)
-                                message.success(`已复制 ${diff.removed.length} 个模型ID`)
+                                copyText(names, `已复制 ${diff.removed.length} 个模型ID`)
                               }}
                             >
                               复制全部
@@ -3300,8 +3321,7 @@ export default function Sites() {
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  navigator.clipboard.writeText(model.id)
-                                  message.success(`已复制: ${model.id}`)
+                                  copyText(model.id, `已复制: ${model.id}`)
                                 }}
                               >
                                 {model.id}
